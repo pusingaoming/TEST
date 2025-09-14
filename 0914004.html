@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>線上測驗系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #e0f7fa; /* 馬卡龍藍色 */
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .progress-bar-container {
+            background-color: #b2ebf2; /* 較深的馬卡龍藍色 */
+            height: 1rem;
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            background-color: #64dd17; /* 鮮豔的綠色，用於對比 */
+            height: 100%;
+            transition: width 0.3s ease-in-out;
+        }
+        .option-button {
+            transition: all 0.2s;
+        }
+        .option-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .correct {
+            background-color: #d1fae5;
+            border-color: #34d399;
+        }
+        .wrong {
+            background-color: #fee2e2;
+            border-color: #f87171;
+        }
+        .disabled-option {
+            pointer-events: none;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        .nav-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 3rem;
+            height: 7rem;
+            background-color: #b3e5fc; /* 另一種馬卡龍藍色 */
+            border-radius: 0.5rem;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        .nav-btn:hover {
+            background-color: #81d4fa; /* 較深的藍色 */
+            transform: scale(1.05);
+        }
+        .nav-btn:disabled {
+            background-color: #e0f7fa;
+            cursor: not-allowed;
+            opacity: 0.5;
+            transform: none;
+        }
+        .nav-btn-prev::before {
+            content: '';
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-top: 1rem solid transparent;
+            border-bottom: 1rem solid transparent;
+            border-right: 1rem solid #4b5563; /* gray-700 */
+        }
+        .nav-btn-next::before {
+            content: '';
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-top: 1rem solid transparent;
+            border-bottom: 1rem solid transparent;
+            border-left: 1rem solid #4b5563; /* gray-700 */
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex items-center justify-center min-h-screen">
+    <div id="app" class="container mx-auto">
+        <!-- Main Quiz UI will be rendered here -->
+    </div>
+
+    <script>
+        let questionBank = [];
+        let questions = [];
+        let userAnswers = []; // 新增：儲存使用者答案的陣列
+        let currentQuestionIndex = 0;
+        let correctAnswers = 0;
+        let selectedAnswer = null;
+        let answered = false;
+        let isReviewing = false; // 新增：是否處於檢視模式
+        let wrongQuestions = [];
+        let removedQuestions = [];
+        let quizSize = 0;
+        let originalFileName = '';
+
+        const app = document.getElementById('app');
+
+        // Initial setup UI with file import
+        function renderInitialScreen() {
+            app.innerHTML = `
+                <div class="card text-center">
+                    <h1 class="text-3xl font-bold mb-4">線上測驗系統</h1>
+                    <p class="text-gray-600 mb-6">請先導入您的題庫檔案 (.js)。</p>
+                    
+                    <div class="file-input-container mb-6">
+                        <input type="file" id="fileInput" accept=".js" class="hidden">
+                        <label for="fileInput" class="px-6 py-3 bg-blue-500 text-white font-bold rounded-lg shadow-md hover:bg-blue-600 transition-colors cursor-pointer">
+                            選擇題庫檔案
+                        </label>
+                    </div>
+                    
+                    <div id="fileStatus" class="text-gray-500"></div>
+                    
+                    <div id="quizOptions" class="hidden mt-8">
+                        <p class="text-gray-600 mb-4">檔案已載入！請選擇您想測驗的題數。</p>
+                        <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
+                            <button onclick="startQuiz(25)" class="px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors">25 題</button>
+                            <button onclick="startQuiz(50)" class="px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors">50 題</button>
+                            <button onclick="startQuiz(75)" class="px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors">75 題</button>
+                            <button onclick="startQuiz(100)" class="px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors">100 題</button>
+                            <button onclick="startQuiz('all')" class="px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors">全部 (${questionBank.length} 題)</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const fileInput = document.getElementById('fileInput');
+            const fileStatus = document.getElementById('fileStatus');
+            const quizOptions = document.getElementById('quizOptions');
+
+            fileInput.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    originalFileName = file.name;
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const fileContent = e.target.result;
+                            const jsonContent = fileContent.replace(/const questionBank\s*=\s*/, '').replace(/;$/, '').trim();
+                            
+                            // Check if the content is a valid JSON array
+                            if (jsonContent.startsWith('[') && jsonContent.endsWith(']')) {
+                                questionBank = JSON.parse(jsonContent);
+
+                                if (Array.isArray(questionBank) && questionBank.length > 0) {
+                                    // Updated line to show the total count
+                                    fileStatus.textContent = `檔案 "${file.name}" 已成功載入！共有 ${questionBank.length} 題。`;
+                                    quizOptions.classList.remove('hidden');
+                                    document.querySelector('#quizOptions button:last-child').textContent = `全部 (${questionBank.length} 題)`;
+                                } else {
+                                    fileStatus.textContent = `錯誤：題庫檔案內容無效。`;
+                                    questionBank = []; // Reset the question bank
+                                }
+                            } else {
+                                fileStatus.textContent = `錯誤：題庫檔案格式無效。`;
+                                questionBank = []; // Reset the question bank
+                            }
+                        } catch (error) {
+                            fileStatus.textContent = `載入檔案時發生錯誤：${error.message}`;
+                            console.error(error);
+                            questionBank = []; // Reset the question bank
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            });
+        }
+
+        // Start the quiz
+        function startQuiz(num) {
+            currentQuestionIndex = 0;
+            correctAnswers = 0;
+            answered = false;
+            isReviewing = false;
+            userAnswers = [];
+            wrongQuestions = [];
+            
+            let totalQuestions = questionBank.length;
+            if (num !== 'all') {
+                quizSize = parseInt(num);
+            } else {
+                quizSize = totalQuestions;
+            }
+
+            // Shuffle questions and ensure removed questions are not included
+            const availableQuestions = questionBank.filter(q => !removedQuestions.some(removedQ => removedQ.id === q.id));
+            questions = [...availableQuestions].sort(() => 0.5 - Math.random()).slice(0, quizSize);
+            
+            if (questions.length === 0) {
+                app.innerHTML = `
+                    <div class="card text-center p-8">
+                        <h1 class="text-2xl font-bold text-red-500 mb-4">錯誤：沒有可用的題目！</h1>
+                        <p class="text-gray-600">請確認您的題庫檔案中包含題目，或重新匯入一個未被清空的題庫。</p>
+                        <button onclick="renderInitialScreen()" class="mt-6 px-6 py-3 bg-gray-200 text-gray-700 font-bold rounded-lg shadow-md transition-colors hover:bg-gray-300">返回首頁</button>
+                    </div>
+                `;
+                return;
+            }
+
+            renderQuizScreen();
+        }
+
+        // Render a single question
+        function renderQuizScreen() {
+            if (currentQuestionIndex >= quizSize) {
+                renderResultScreen();
+                return;
+            }
+
+            const question = questions[currentQuestionIndex];
+            const progressPercentage = (currentQuestionIndex / quizSize) * 100;
+            
+            app.innerHTML = `
+                <div class="card">
+                    <!-- Progress Bar & Score -->
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="w-full mr-4">
+                            <div class="text-sm font-semibold text-gray-700 mb-1">
+                                進度：<span id="question-count">${currentQuestionIndex + 1} / ${quizSize}</span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar" style="width: ${progressPercentage}%;"></div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-2xl font-bold text-green-600" id="score">${correctAnswers}</span> / <span class="text-xl text-gray-500">${currentQuestionIndex}</span>
+                        </div>
+                    </div>
+
+                    <!-- Question Content -->
+                    <div class="mb-6">
+                        <div class="text-sm font-semibold text-gray-500">來源: ${question.level}</div>
+                        <!-- 新增: 顯示已移除題目數量 -->
+                        <div class="text-sm font-semibold text-gray-500 mb-2">已移除題目數量: ${removedQuestions.length}</div>
+                        <!-- Flex container for question number/title and remove button -->
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-xl font-bold my-4">${question.id}. ${question.question}</h2>
+                            <button onclick="removeQuestion(${question.id})" class="px-3 py-1 bg-red-500 text-white font-bold rounded-lg shadow-md transition-colors hover:bg-red-600 ml-4 whitespace-nowrap">從題庫中去除該題</button>
+                        </div>
+                    </div>
+
+                    <!-- Main flex container for options and buttons -->
+                    <div class="flex items-center justify-between space-x-4">
+                        <!-- Left button -->
+                        <button id="prev-btn" onclick="previousQuestion()" class="nav-btn nav-btn-prev" disabled></button>
+
+                        <!-- Options container in the middle -->
+                        <div id="options-container" class="flex-grow space-y-3">
+                            <!-- Options will be rendered here -->
+                        </div>
+
+                        <!-- Right button -->
+                        <button id="next-btn" onclick="nextQuestion()" class="nav-btn nav-btn-next" disabled></button>
+                    </div>
+                    
+                    <!-- Feedback & Navigation -->
+                    <div id="feedback-container" class="hidden my-6">
+                        <div id="feedback-message" class="text-lg font-bold"></div>
+                        <div id="explanation" class="text-gray-700 mt-2"></div>
+                    </div>
+                </div>
+            `;
+
+            const optionsContainer = document.getElementById('options-container');
+            const feedbackContainer = document.getElementById('feedback-container');
+            const feedbackMessage = document.getElementById('feedback-message');
+            const explanation = document.getElementById('explanation');
+            const nextBtn = document.getElementById('next-btn');
+            const prevBtn = document.getElementById('prev-btn');
+
+            // Render options
+            question.options.forEach((option, index) => {
+                const optionBtn = document.createElement('button');
+                optionBtn.className = 'option-button w-full text-left px-4 py-3 border rounded-lg bg-gray-50 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors';
+                optionBtn.textContent = `${['A', 'B', 'C', 'D'][index]}. ${option}`;
+                optionBtn.setAttribute('data-index', index);
+                optionBtn.onclick = () => selectOption(optionBtn, index, question.answer - 1);
+                optionsContainer.appendChild(optionBtn);
+            });
+
+            // Handle Review Mode
+            if (isReviewing || currentQuestionIndex < userAnswers.length) {
+                answered = true;
+                nextBtn.disabled = false;
+                
+                const allOptions = document.querySelectorAll('.option-button');
+                allOptions.forEach(btn => btn.classList.add('disabled-option'));
+
+                const userSelected = userAnswers[currentQuestionIndex];
+                const correctIndex = question.answer - 1;
+
+                // Highlight user's answer
+                if (userSelected !== undefined) {
+                    const userOptionBtn = document.querySelector(`[data-index="${userSelected}"]`);
+                    userOptionBtn.classList.add(userSelected === correctIndex ? 'correct' : 'wrong');
+                }
+
+                // Highlight correct answer
+                const correctOptionBtn = document.querySelector(`[data-index="${correctIndex}"]`);
+                correctOptionBtn.classList.add('correct');
+
+                // Display feedback and explanation
+                if (userSelected === correctIndex) {
+                    feedbackMessage.textContent = '✔️ 恭喜你，回答正確！';
+                    feedbackMessage.classList.add('text-green-600');
+                } else {
+                    feedbackMessage.textContent = '❌ 回答錯誤！';
+                    feedbackMessage.classList.add('text-red-600');
+                }
+                
+                explanation.innerHTML = `
+                    <p class="font-bold">正確答案：${['A', 'B', 'C', 'D'][correctIndex]}. ${question.options[correctIndex]}</p>
+                    <p class="mt-2 font-bold">解析:</p>
+                    <p>${question.explanation}</p>
+                `;
+                feedbackContainer.classList.remove('hidden');
+
+            } else {
+                answered = false;
+                nextBtn.disabled = true;
+            }
+            
+            // Disable 'Previous' button on the first question
+            prevBtn.disabled = currentQuestionIndex === 0;
+            // Update score display
+            const scoreDisplay = document.getElementById('score');
+            scoreDisplay.textContent = correctAnswers;
+        }
+
+        // Handle user selecting an option
+        function selectOption(button, selectedIndex, correctIndex) {
+            if (answered) return;
+            answered = true;
+            userAnswers[currentQuestionIndex] = selectedIndex; // 儲存使用者答案
+            
+            const feedbackContainer = document.getElementById('feedback-container');
+            const feedbackMessage = document.getElementById('feedback-message');
+            const explanation = document.getElementById('explanation');
+            const nextBtn = document.getElementById('next-btn');
+            const allOptions = document.querySelectorAll('.option-button');
+
+            allOptions.forEach(btn => {
+                btn.disabled = true;
+                btn.classList.add('disabled-option');
+            });
+            nextBtn.disabled = false;
+
+            if (selectedIndex === correctIndex) {
+                correctAnswers++;
+                button.classList.add('correct');
+                feedbackMessage.textContent = '✔️ 恭喜你，回答正確！';
+                feedbackMessage.classList.add('text-green-600');
+            } else {
+                button.classList.add('wrong');
+                const correctOptionBtn = document.querySelector(`[data-index="${correctIndex}"]`);
+                correctOptionBtn.classList.add('correct');
+                feedbackMessage.textContent = '❌ 回答錯誤！';
+                feedbackMessage.classList.add('text-red-600');
+                wrongQuestions.push(questions[currentQuestionIndex]);
+            }
+            
+            explanation.innerHTML = `
+                <p class="font-bold">正確答案：${['A', 'B', 'C', 'D'][correctIndex]}. ${questions[currentQuestionIndex].options[correctIndex]}</p>
+                <p class="mt-2 font-bold">解析:</p>
+                <p>${questions[currentQuestionIndex].explanation}</p>
+            `;
+
+            feedbackContainer.classList.remove('hidden');
+        }
+
+        // Move to next question
+        function nextQuestion() {
+            currentQuestionIndex++;
+            isReviewing = false; // 離開檢視模式
+            renderQuizScreen();
+        }
+        
+        // Move to previous question (enters review mode)
+        function previousQuestion() {
+            if (currentQuestionIndex > 0) {
+                currentQuestionIndex--;
+                isReviewing = true; // 進入檢視模式
+                renderQuizScreen();
+            }
+        }
+
+        // Remove question from future quizzes and update the bank
+        function removeQuestion(questionId) {
+            const index = questionBank.findIndex(q => q.id === questionId);
+            if (index > -1) {
+                const removedQ = questionBank.splice(index, 1)[0];
+                removedQuestions.push(removedQ);
+            }
+            nextQuestion();
+        }
+
+        // Render result screen and automatically download files
+        function renderResultScreen() {
+            let wrongQuestionsHtml = wrongQuestions.length > 0 ? `
+                <h3 class="text-xl font-bold mt-8 mb-4">您的錯題整理：</h3>
+                <div class="space-y-6">
+                    ${wrongQuestions.map(q => `
+                        <div class="bg-gray-100 p-4 rounded-lg">
+                            <h4 class="font-bold text-gray-800">題序: ${q.id} (${q.level})</h4>
+                            <p class="mt-1">${q.question}</p>
+                            <ul class="list-disc list-inside mt-2 text-sm text-gray-700">
+                                ${q.options.map((opt, i) => `<li>${['A', 'B', 'C', 'D'][i]}. ${opt}</li>`).join('')}
+                            </ul>
+                            <p class="mt-2 font-bold text-green-600">正確答案：${q.answerLetter}</p>
+                            <p class="mt-2 font-bold text-gray-800">解析:</p>
+                            <p class="text-gray-700">${q.explanation}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : `<p class="mt-4">恭喜！您本次測驗沒有錯題。</p>`;
+
+            // Generate filenames based on the original file name and current time
+            const date = new Date();
+            const dateTimeStr = `${(date.getMonth() + 1).toString().padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}${date.getHours().toString().padStart(2, '0')}${date.getMinutes().toString().padStart(2, '0')}`;
+            
+            let baseFileName = originalFileName.replace(/\.js$/i, '');
+            const updateRegex = /更新\d{8}$/;
+            if (updateRegex.test(baseFileName)) {
+                baseFileName = baseFileName.replace(updateRegex, '');
+            }
+            
+            const wrongFileName = `${baseFileName}錯題${dateTimeStr}.js`;
+            const updatedFileName = `${baseFileName}更新${dateTimeStr}.js`;
+            
+            // Generate content strings once
+            const wrongQuestionsJs = `const questionBank = ${JSON.stringify(wrongQuestions, null, 2)};`;
+            let updatedQuestionBank = questionBank.filter(q => !removedQuestions.some(removedQ => removedQ.id === q.id));
+            const updatedQuestionsJs = `const questionBank = ${JSON.stringify(updatedQuestionBank, null, 2)};`;
+
+            app.innerHTML = `
+                <div class="card text-center">
+                    <h1 class="text-3xl font-bold mb-4">測驗完成！</h1>
+                    <p class="text-xl text-gray-600">您的成績是：</p>
+                    <p class="text-5xl font-bold text-green-600 my-4">${correctAnswers} / ${quizSize}</p>
+                    <p class="text-gray-500">正確率: ${((correctAnswers / quizSize) * 100).toFixed(2)}%</p>
+                    
+                    <div class="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 mt-8">
+                        <p class="text-gray-600">匯出檔案中，請稍候...</p>
+                    </div>
+                    
+                    <button onclick="renderInitialScreen()" class="mt-6 px-6 py-3 bg-gray-200 text-gray-700 font-bold rounded-lg shadow-md transition-colors hover:bg-gray-300">返回首頁</button>
+
+                    <div class="text-left">${wrongQuestionsHtml}</div>
+                </div>
+            `;
+            // 自動觸發檔案下載
+            downloadFile(wrongFileName, encodeURIComponent(wrongQuestionsJs));
+            downloadFile(updatedFileName, encodeURIComponent(updatedQuestionsJs));
+        }
+
+        // Utility function to download files
+        function downloadFile(filename, encodedContent) {
+            const content = decodeURIComponent(encodedContent);
+            const blob = new Blob([content], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Start the application
+        renderInitialScreen();
+    </script>
+</body>
+</html>
